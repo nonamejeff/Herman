@@ -6,28 +6,37 @@
   <style>
     body { margin: 0; overflow: hidden; background: #f0f0f0; }
     canvas { display: block; }
+    #status {
+      position: fixed;
+      top: 8px;
+      left: 8px;
+      padding: 4px 8px;
+      background: rgba(255,255,255,0.9);
+      font: 14px sans-serif;
+      border: 1px solid #ccc;
+      z-index: 1000;
+    }
   </style>
 </head>
 <body>
+  <div id="status">Loading…</div>
   <canvas id="cv"></canvas>
   <script>
+    const status = document.getElementById('status');
     const canvas = document.getElementById('cv');
     const ctx    = canvas.getContext('2d');
     const dpr    = window.devicePixelRatio || 1;
 
-    // camera state
+    // camera for pan & zoom
     const cam = { x: 0, y: 0, scale: 1 };
+    let isPanning = false, lastX = 0, lastY = 0;
 
-    // panning
-    let isPanning = false;
-    let lastX = 0, lastY = 0;
-
-    // image cache
+    // cache images
     const imgCache = {};
 
     let data, sceneW = 10000, sceneH = 10000;
 
-    // resize for retina
+    // resize canvas to CSS size × DPR
     function resize() {
       canvas.width  = window.innerWidth  * dpr;
       canvas.height = window.innerHeight * dpr;
@@ -37,37 +46,47 @@
     }
     window.addEventListener('resize', resize);
 
-    // load JSON
-    async function load() {
+    // load the JSON file
+    async function loadJournal() {
       try {
         const resp = await fetch('JOURNAL.jrn');
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         data = await resp.json();
+        console.log('journal data:', data);
+        // override scene size if provided
         sceneW = data.width  || sceneW;
         sceneH = data.height || sceneH;
-        // center initial view
-        cam.x = -sceneW / 2;
-        cam.y = -sceneH / 2;
+        // center scene initially
+        cam.x = -sceneW/2;
+        cam.y = -sceneH/2;
+        status.textContent = `Loaded ${data.items?.length || 0} items`;
         resize();
       } catch (err) {
         console.error(err);
-        alert('Failed to load JOURNAL.jrn:\n' + err);
+        status.textContent = `Error loading: ${err.message}`;
+        ctx.save();
+        ctx.scale(dpr, dpr);
+        ctx.fillStyle = '#fee';
+        ctx.fillRect(0,0,window.innerWidth,window.innerHeight);
+        ctx.fillStyle = '#900';
+        ctx.font = '20px sans-serif';
+        ctx.fillText('Failed to load JOURNAL.jrn', 10, 30);
+        ctx.restore();
       }
     }
-    load();
+    loadJournal();
 
-    // convert screen → world (CSS px)
+    // convert screen coords → world coords
     function screenToWorld(sx, sy) {
-      const cx = (sx - window.innerWidth / 2) / cam.scale - cam.x;
-      const cy = (sy - window.innerHeight / 2) / cam.scale - cam.y;
+      const cx = (sx - window.innerWidth/2)/cam.scale - cam.x;
+      const cy = (sy - window.innerHeight/2)/cam.scale - cam.y;
       return { x: cx, y: cy };
     }
 
-    // pan handlers
+    // pan start
     canvas.addEventListener('mousedown', e => {
       isPanning = true;
-      lastX = e.clientX;
-      lastY = e.clientY;
+      lastX = e.clientX; lastY = e.clientY;
     });
     window.addEventListener('mouseup', () => {
       isPanning = false;
@@ -76,8 +95,7 @@
       if (!isPanning) return;
       const dx = e.clientX - lastX;
       const dy = e.clientY - lastY;
-      lastX = e.clientX;
-      lastY = e.clientY;
+      lastX = e.clientX; lastY = e.clientY;
       cam.x += dx / cam.scale;
       cam.y += dy / cam.scale;
       draw();
@@ -95,23 +113,22 @@
       draw();
     }, { passive: false });
 
-    // main draw
+    // main draw loop
     function draw() {
       if (!data) return;
-
       ctx.save();
       ctx.scale(dpr, dpr);
 
-      // clear & background
+      // clear + background
       ctx.fillStyle = data.background || '#fff';
       ctx.fillRect(0, 0, window.innerWidth, window.innerHeight);
 
-      // apply camera (CSS px coords)
-      ctx.translate(window.innerWidth / 2, window.innerHeight / 2);
+      // camera transform
+      ctx.translate(window.innerWidth/2, window.innerHeight/2);
       ctx.scale(cam.scale, cam.scale);
       ctx.translate(cam.x, cam.y);
 
-      // draw items
+      // draw each item
       for (const itm of data.items) {
         if (itm.type === 'image') {
           let img = imgCache[itm.b64];
@@ -123,10 +140,7 @@
           }
           if (img.complete) {
             const s = itm.scale || 1;
-            ctx.drawImage(img,
-              itm.x, itm.y,
-              img.width * s, img.height * s
-            );
+            ctx.drawImage(img, itm.x, itm.y, img.width*s, img.height*s);
           }
         } else if (itm.type === 'text') {
           ctx.fillStyle = '#000';
