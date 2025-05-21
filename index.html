@@ -7,7 +7,7 @@
     body { margin:0; overflow:hidden; background:#f0f0f0 }
     canvas { display:block }
     #status {
-      position: fixed; top:8px; left:8px;
+      position:fixed; top:8px; left:8px;
       padding:4px 8px; background:rgba(255,255,255,0.9);
       border:1px solid #ccc; font:14px sans-serif;
       z-index:1000;
@@ -42,56 +42,53 @@
     async function loadJournal(){
       try {
         const resp = await fetch('JOURNAL.jrn');
-        if(!resp.ok) throw new Error(resp.status);
+        if(!resp.ok) throw new Error(`HTTP ${resp.status}`);
         data = await resp.json();
         sceneW = data.width  || sceneW;
         sceneH = data.height || sceneH;
-        status.textContent = 'Preloading images…';
-        // preload images
+
+        // preload all images
         const imgs = data.items.filter(i=>i.type==='image');
+        let loaded = 0;
+        status.textContent = `Loading ${imgs.length} images…`;
         await Promise.all(imgs.map(itm => new Promise(res=>{
           const img = new Image();
           img.src = 'data:image/png;base64,' + itm.b64;
-          img.onload = ()=>{
-            imgCache[itm.b64] = img;
-            res();
-          };
+          img.onload = ()=>{ imgCache[itm.b64]=img; loaded++; status.textContent = `Loaded ${loaded}/${imgs.length}`; res(); };
         })));
+
         status.textContent = 'All images loaded';
         cam.x = 0; cam.y = 0; cam.scale = 1;
         resize();
       } catch(err){
         console.error(err);
-        status.textContent = 'Error loading: '+err;
+        status.textContent = `Error: ${err.message}`;
       }
     }
     loadJournal();
 
     // pan handlers
-    canvas.addEventListener('mousedown',e=>{
-      isPanning = true; lastX=e.clientX; lastY=e.clientY;
+    canvas.addEventListener('mousedown', e=>{
+      isPanning = true; lastX = e.clientX; lastY = e.clientY;
     });
     window.addEventListener('mouseup',()=>isPanning=false);
-    canvas.addEventListener('mousemove',e=>{
+    canvas.addEventListener('mousemove', e=>{
       if(!isPanning) return;
       const dx = e.clientX - lastX, dy = e.clientY - lastY;
       lastX = e.clientX; lastY = e.clientY;
-      // dx,dy in CSS px; world‐units = dx/(cam.scale)
-      cam.x += dx / cam.scale;
-      cam.y += dy / cam.scale;
+      cam.x += dx / (dpr * cam.scale);
+      cam.y += dy / (dpr * cam.scale);
       draw();
     });
 
     // zoom toward cursor
     canvas.addEventListener('wheel', e=>{
       e.preventDefault();
-      const sx=e.clientX, sy=e.clientY;
-      // world under cursor before zoom
+      const sx = e.clientX, sy = e.clientY;
       const wx0 = (sx / cam.scale / dpr) - cam.x;
       const wy0 = (sy / cam.scale / dpr) - cam.y;
       const f = Math.exp(-e.deltaY * 0.001);
       cam.scale *= f;
-      // adjust pan so that world point stays under cursor
       cam.x = (sx / cam.scale / dpr) - wx0;
       cam.y = (sy / cam.scale / dpr) - wy0;
       draw();
@@ -100,41 +97,37 @@
     function draw(){
       if(!data) return;
 
-      // 1) reset transform & clear entire device‐pixel canvas
+      // reset & clear
       ctx.setTransform(1,0,0,1,0,0);
       ctx.clearRect(0,0,canvas.width,canvas.height);
 
-      // 2) draw background in device pixels
+      // draw background
       ctx.setTransform(dpr,0,0,dpr,0,0);
       ctx.fillStyle = data.background||'#fff';
       ctx.fillRect(0,0,window.innerWidth,window.innerHeight);
 
-      // 3) apply single composite transform: [dpr*scale, ... , pan*dpr*scale]
+      // composite transform
       const m = dpr * cam.scale;
-      ctx.setTransform(
-        m, 0,
-        0, m,
-        cam.x * m,
-        cam.y * m
-      );
+      ctx.setTransform(m,0,0,m, cam.x*m, cam.y*m);
 
-      // 4) render every item exactly at its world x,y
+      // draw items
+      const lineHeight = 18; // match your font size + spacing
+      ctx.fillStyle = '#000';
+      ctx.font = '16px Courier New';
       for(const itm of data.items){
-        if(itm.type === 'image'){
+        if(itm.type==='image'){
           const img = imgCache[itm.b64];
           if(img){
             const s = itm.scale||1;
-            ctx.drawImage(img,
-              itm.x, itm.y,
-              img.width * s,
-              img.height * s
-            );
+            ctx.drawImage(img, itm.x, itm.y, img.width*s, img.height*s);
           }
         }
-        else if(itm.type === 'text'){
-          ctx.fillStyle = '#000';
-          ctx.font = '16px Courier New';
-          ctx.fillText(itm.text, itm.x, itm.y + 16);
+        else if(itm.type==='text'){
+          // split on \n that your Python wrote in
+          const lines = itm.text.split('\n');
+          for(let i=0; i<lines.length; i++){
+            ctx.fillText(lines[i], itm.x, itm.y + (i+1)*lineHeight);
+          }
         }
       }
     }
