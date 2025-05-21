@@ -1,154 +1,136 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="UTF-8" />
   <title>Journal Viewer</title>
   <style>
-    body { margin:0; overflow:hidden; background:#f0f0f0 }
-    canvas { display:block }
+    body {
+      margin: 0;
+      overflow: hidden;
+      background: #f0f0f0;
+      font-family: "Courier New", monospace;
+    }
     #status {
-      position:fixed; top:8px; left:8px;
-      padding:4px 8px; background:rgba(255,255,255,0.9);
-      border:1px solid #ccc; font:14px sans-serif;
-      z-index:1000;
+      position: fixed;
+      top: 8px;
+      left: 8px;
+      padding: 4px 8px;
+      background: rgba(255,255,255,0.9);
+      border: 1px solid #ccc;
+      font: 14px sans-serif;
+      z-index: 1000;
+    }
+    #container {
+      position: absolute;
+      top: 0;
+      left: 0;
+      transform-origin: 0 0;
+    }
+    #container img {
+      position: absolute;
+      user-select: none;
+      pointer-events: none;
+    }
+    #container .text-item {
+      position: absolute;
+      white-space: pre-wrap;       /* preserves your \n */
+      font-size: 16px;
+      line-height: 1.125;          /* tweak if you need more or less gap */
+      color: #000;
+      pointer-events: none;
     }
   </style>
 </head>
 <body>
   <div id="status">Loading…</div>
-  <canvas id="cv"></canvas>
+  <div id="container"></div>
   <script>
-    const canvas = document.getElementById('cv');
-    const ctx    = canvas.getContext('2d');
-    const status = document.getElementById('status');
-    const dpr    = window.devicePixelRatio || 1;
+    const status = document.getElementById("status");
+    const container = document.getElementById("container");
 
     // pan & zoom state
-    const cam = { x:0, y:0, scale:1 };
-    let isPanning = false, lastX, lastY;
+    let cam = { x: 0, y: 0, scale: 1 };
+    let isPanning = false, lastX = 0, lastY = 0;
 
-    let data, sceneW=10000, sceneH=10000;
-    const imgCache = {};
-
-    function resize(){
-      canvas.width  = innerWidth  * dpr;
-      canvas.height = innerHeight * dpr;
-      canvas.style.width  = innerWidth  + 'px';
-      canvas.style.height = innerHeight + 'px';
-      draw();
-    }
-    window.addEventListener('resize', resize);
-
-    async function loadJournal(){
-      try {
-        const resp = await fetch('JOURNAL.jrn');
-        if (!resp.ok) throw new Error(resp.status);
-        data = await resp.json();
-        sceneW = data.width  || sceneW;
-        sceneH = data.height || sceneH;
-
-        const imgs = data.items.filter(i=>i.type==='image');
-        let cnt=0;
-        status.textContent = `Loading ${imgs.length} images…`;
-        await Promise.all(imgs.map(itm=>new Promise(res=>{
-          const img = new Image();
-          img.src = 'data:image/png;base64,' + itm.b64;
-          img.onload = ()=>{
-            imgCache[itm.b64] = img;
-            cnt++;
-            status.textContent = `Loaded ${cnt}/${imgs.length}`;
-            res();
-          };
-        })));
-
-        status.textContent = 'All images loaded';
-        cam.x = cam.y = 0;
-        cam.scale = 1;
-        resize();
-      } catch(err) {
-        console.error(err);
-        status.textContent = `Error: ${err.message}`;
-      }
-    }
-    loadJournal();
-
-    // pan handlers
-    canvas.addEventListener('mousedown', e=>{
+    // handle pan
+    window.addEventListener("mousedown", e => {
       isPanning = true;
       lastX = e.clientX; lastY = e.clientY;
     });
-    window.addEventListener('mouseup', ()=> isPanning = false);
-    canvas.addEventListener('mousemove', e=>{
+    window.addEventListener("mouseup", () => isPanning = false);
+    window.addEventListener("mousemove", e => {
       if (!isPanning) return;
       const dx = e.clientX - lastX, dy = e.clientY - lastY;
       lastX = e.clientX; lastY = e.clientY;
-      cam.x += dx / (dpr * cam.scale);
-      cam.y += dy / (dpr * cam.scale);
-      draw();
+      cam.x += dx;
+      cam.y += dy;
+      updateTransform();
     });
 
-    // zoom toward cursor
-    canvas.addEventListener('wheel', e=>{
+    // handle zoom
+    window.addEventListener("wheel", e => {
       e.preventDefault();
-      const sx = e.clientX, sy = e.clientY;
-      const wx0 = (sx / (cam.scale * dpr)) - cam.x;
-      const wy0 = (sy / (cam.scale * dpr)) - cam.y;
-      const f = Math.exp(-e.deltaY * 0.001);
-      cam.scale *= f;
-      cam.x = (sx / (cam.scale * dpr)) - wx0;
-      cam.y = (sy / (cam.scale * dpr)) - wy0;
-      draw();
-    }, { passive:false });
+      const rect = container.getBoundingClientRect();
+      const ox = e.clientX - rect.left;
+      const oy = e.clientY - rect.top;
+      const beforeX = (ox - cam.x) / cam.scale;
+      const beforeY = (oy - cam.y) / cam.scale;
+      const factor = Math.exp(-e.deltaY * 0.001);
+      cam.scale *= factor;
+      cam.x = ox - beforeX * cam.scale;
+      cam.y = oy - beforeY * cam.scale;
+      updateTransform();
+    }, { passive: false });
 
-    function draw(){
-      if (!data) return;
-
-      // 1) reset & clear
-      ctx.setTransform(1,0,0,1,0,0);
-      ctx.clearRect(0,0,canvas.width,canvas.height);
-
-      // 2) background
-      ctx.setTransform(dpr,0,0,dpr,0,0);
-      ctx.fillStyle = data.background || '#fff';
-      ctx.fillRect(0,0, innerWidth, innerHeight);
-
-      // 3) pan+zoom
-      const m = dpr * cam.scale;
-      ctx.setTransform(m,0,0,m, cam.x*m, cam.y*m);
-
-      // 4) text style & measurement
-      ctx.fillStyle    = '#000';
-      ctx.font         = '16px Courier New';
-      ctx.textAlign    = 'center';
-      ctx.textBaseline = 'middle';
-      const metr       = ctx.measureText('M');
-      const rawH       = metr.actualBoundingBoxAscent + metr.actualBoundingBoxDescent;
-      const lineHeight = rawH + 4;
-
-      // 5) draw items at their centers
-      for (const itm of data.items) {
-        if (itm.type === 'image') {
-          const img = imgCache[itm.b64];
-          if (!img) continue;
-          const s = itm.scale || 1;
-          const w = img.width * s, h = img.height * s;
-          ctx.drawImage(img,
-            itm.x - w/2, itm.y - h/2,
-            w,           h
-          );
-        }
-        else if (itm.type === 'text') {
-          const lines = itm.text.split(/\r?\n/);
-          for (let i = 0; i < lines.length; i++) {
-            ctx.fillText(
-              lines[i],
-              itm.x,                     // centered X
-              itm.y + (i - (lines.length-1)/2) * lineHeight
-            );
-          }
-        }
-      }
+    function updateTransform() {
+      container.style.transform = 
+        `translate(${cam.x}px,${cam.y}px) scale(${cam.scale})`;
     }
+
+    // load and render the journal
+    async function load() {
+      const resp = await fetch("JOURNAL.jrn");
+      if (!resp.ok) {
+        status.textContent = "Failed to load JOURNAL.jrn";
+        return;
+      }
+      const data = await resp.json();
+      status.textContent = "Rendering…";
+
+      // first, render images
+      const images = data.items.filter(i => i.type === "image");
+      let done = 0;
+      for (let itm of images) {
+        const img = new Image();
+        img.src = "data:image/png;base64," + itm.b64;
+        await new Promise(res => img.onload = res);
+        img.style.left   = itm.x + "px";
+        img.style.top    = itm.y + "px";
+        img.style.width  = img.naturalWidth  * (itm.scale||1) + "px";
+        img.style.height = img.naturalHeight * (itm.scale||1) + "px";
+        container.appendChild(img);
+        done++;
+        status.textContent = `Loaded ${done}/${images.length} images…`;
+      }
+
+      // next, render text
+      for (let itm of data.items.filter(i => i.type === "text")) {
+        const div = document.createElement("div");
+        div.className = "text-item";
+        div.textContent = itm.text;      // preserves your \n
+        div.style.left = itm.x + "px";
+        div.style.top  = itm.y + "px";
+        if (itm.width) {
+          div.style.width = itm.width + "px";
+        }
+        container.appendChild(div);
+      }
+
+      status.style.display = "none";
+      updateTransform();
+    }
+
+    load();
   </script>
 </body>
 </html>
