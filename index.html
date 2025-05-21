@@ -23,17 +23,17 @@
     const status = document.getElementById('status');
     const dpr    = window.devicePixelRatio || 1;
 
-    // pan & zoom
+    // pan & zoom state
     const cam = { x:0, y:0, scale:1 };
-    let isPanning=false, lastX, lastY;
+    let isPanning = false, lastX, lastY;
 
     let data, sceneW=10000, sceneH=10000;
     const imgCache = {};
 
     function resize(){
-      canvas.width  = innerWidth * dpr;
+      canvas.width  = innerWidth  * dpr;
       canvas.height = innerHeight * dpr;
-      canvas.style.width  = innerWidth + 'px';
+      canvas.style.width  = innerWidth  + 'px';
       canvas.style.height = innerHeight + 'px';
       draw();
     }
@@ -42,26 +42,30 @@
     async function loadJournal(){
       try {
         const resp = await fetch('JOURNAL.jrn');
-        if(!resp.ok) throw new Error(resp.status);
+        if (!resp.ok) throw new Error(resp.status);
         data = await resp.json();
-        console.log('Loaded items:', data.items);
         sceneW = data.width  || sceneW;
         sceneH = data.height || sceneH;
 
-        // preload images
-        const imgs = data.items.filter(i=>i.type==='image');
-        let cnt=0;
+        const imgs = data.items.filter(i => i.type === 'image');
+        let cnt = 0;
         status.textContent = `Loading ${imgs.length} images…`;
-        await Promise.all(imgs.map(itm=>new Promise(res=>{
+        await Promise.all(imgs.map(itm => new Promise(res => {
           const img = new Image();
           img.src = 'data:image/png;base64,' + itm.b64;
-          img.onload = ()=>{ imgCache[itm.b64]=img; cnt++; status.textContent=`Loaded ${cnt}/${imgs.length}`; res() };
+          img.onload = () => {
+            imgCache[itm.b64] = img;
+            cnt++;
+            status.textContent = `Loaded ${cnt}/${imgs.length}`;
+            res();
+          };
         })));
 
         status.textContent = 'All images loaded';
-        cam.x=0; cam.y=0; cam.scale=1;
+        cam.x = cam.y = 0;
+        cam.scale = 1;
         resize();
-      } catch(err){
+      } catch(err) {
         console.error(err);
         status.textContent = `Error: ${err.message}`;
       }
@@ -69,67 +73,71 @@
     loadJournal();
 
     // pan handlers
-    canvas.addEventListener('mousedown', e=>{
-      isPanning=true; lastX=e.clientX; lastY=e.clientY;
+    canvas.addEventListener('mousedown', e => {
+      isPanning = true;
+      lastX = e.clientX;
+      lastY = e.clientY;
     });
-    window.addEventListener('mouseup',()=>isPanning=false);
-    canvas.addEventListener('mousemove', e=>{
-      if(!isPanning) return;
-      const dx=e.clientX-lastX, dy=e.clientY-lastY;
-      lastX=e.clientX; lastY=e.clientY;
-      cam.x += dx/(dpr*cam.scale);
-      cam.y += dy/(dpr*cam.scale);
+    window.addEventListener('mouseup', () => isPanning = false);
+    canvas.addEventListener('mousemove', e => {
+      if (!isPanning) return;
+      const dx = e.clientX - lastX, dy = e.clientY - lastY;
+      lastX = e.clientX;
+      lastY = e.clientY;
+      cam.x += dx / (dpr * cam.scale);
+      cam.y += dy / (dpr * cam.scale);
       draw();
     });
 
     // zoom toward cursor
-    canvas.addEventListener('wheel', e=>{
+    canvas.addEventListener('wheel', e => {
       e.preventDefault();
-      const sx=e.clientX, sy=e.clientY;
-      const wx0=(sx/(cam.scale*dpr))-cam.x;
-      const wy0=(sy/(cam.scale*dpr))-cam.y;
-      const f=Math.exp(-e.deltaY*0.001);
-      cam.scale*=f;
-      cam.x = (sx/(cam.scale*dpr)) - wx0;
-      cam.y = (sy/(cam.scale*dpr)) - wy0;
+      const sx = e.clientX, sy = e.clientY;
+      const wx0 = (sx / (cam.scale * dpr)) - cam.x;
+      const wy0 = (sy / (cam.scale * dpr)) - cam.y;
+      const f = Math.exp(-e.deltaY * 0.001);
+      cam.scale *= f;
+      cam.x = (sx / (cam.scale * dpr)) - wx0;
+      cam.y = (sy / (cam.scale * dpr)) - wy0;
       draw();
-    },{passive:false});
+    }, { passive: false });
 
     function draw(){
-      if(!data) return;
+      if (!data) return;
 
       // 1) reset & clear
-      ctx.setTransform(1,0,0,1,0,0);
-      ctx.clearRect(0,0,canvas.width,canvas.height);
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
 
       // 2) background in device-pixels
-      ctx.setTransform(dpr,0,0,dpr,0,0);
-      ctx.fillStyle = data.background||'#fff';
-      ctx.fillRect(0,0,innerWidth,innerHeight);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.fillStyle = data.background || '#fff';
+      ctx.fillRect(0, 0, innerWidth, innerHeight);
 
-      // 3) composite pan/zoom
-      const m = dpr*cam.scale;
-      ctx.setTransform(m,0,0,m, cam.x*m, cam.y*m);
+      // 3) composite pan+zoom
+      const m = dpr * cam.scale;
+      ctx.setTransform(m, 0, 0, m, cam.x * m, cam.y * m);
 
-      // 4) draw items
+      // 4) text settings & measure a padded line-height
       ctx.fillStyle    = '#000';
       ctx.font         = '16px Courier New';
       ctx.textBaseline = 'top';
-      const lineHeight = 18;
+      const met        = ctx.measureText('M');
+      const rawH       = met.actualBoundingBoxAscent + met.actualBoundingBoxDescent;
+      const lineHeight = rawH + 4;  // ← add extra 4px padding to avoid overlap
 
-      for(const itm of data.items){
-        if(itm.type==='image'){
+      // 5) render items
+      for (const itm of data.items) {
+        if (itm.type === 'image') {
           const img = imgCache[itm.b64];
-          if(img){
-            const s = itm.scale||1;
-            ctx.drawImage(img, itm.x, itm.y, img.width*s, img.height*s);
+          if (img) {
+            const s = itm.scale || 1;
+            ctx.drawImage(img, itm.x, itm.y, img.width * s, img.height * s);
           }
-        }
-        else if(itm.type==='text'){
-          // here’s the magic: split on real newlines
+        } else if (itm.type === 'text') {
           const lines = itm.text.split(/\r?\n/);
-          for(let i=0; i<lines.length; i++){
-            ctx.fillText(lines[i], itm.x, itm.y + i*lineHeight);
+          for (let i = 0; i < lines.length; i++) {
+            ctx.fillText(lines[i], itm.x, itm.y + i * lineHeight);
           }
         }
       }
