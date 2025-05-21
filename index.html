@@ -4,8 +4,8 @@
   <meta charset="UTF-8">
   <title>Journal Viewer</title>
   <style>
-    body { margin:0; overflow:hidden; background:#f0f0f0 }
-    canvas { display:block }
+    body { margin: 0; overflow: hidden; background: #f0f0f0; }
+    canvas { display: block; }
   </style>
 </head>
 <body>
@@ -18,112 +18,119 @@
     // camera state
     const cam = { x: 0, y: 0, scale: 1 };
 
-    // cache images by their base64 string
+    // panning
+    let isPanning = false;
+    let lastX = 0, lastY = 0;
+
+    // image cache
     const imgCache = {};
 
-    let data, sceneW, sceneH;
+    let data, sceneW = 10000, sceneH = 10000;
 
-    // resize for retina and redraw
+    // resize for retina
     function resize() {
       canvas.width  = window.innerWidth  * dpr;
       canvas.height = window.innerHeight * dpr;
       canvas.style.width  = window.innerWidth  + 'px';
       canvas.style.height = window.innerHeight + 'px';
-      // reset transform so drawing commands map to CSS pixels
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       draw();
     }
     window.addEventListener('resize', resize);
 
-    // load your JOURNAL.jrn
+    // load JSON
     async function load() {
       try {
         const resp = await fetch('JOURNAL.jrn');
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         data = await resp.json();
-        // scene dimensions
-        sceneW = data.width  || 10000;
-        sceneH = data.height || 10000;
-        // center & fit
-        cam.scale = Math.min(window.innerWidth/sceneW, window.innerHeight/sceneH);
-        cam.x = -sceneW/2;
-        cam.y = -sceneH/2;
+        sceneW = data.width  || sceneW;
+        sceneH = data.height || sceneH;
+        // center initial view
+        cam.x = -sceneW / 2;
+        cam.y = -sceneH / 2;
         resize();
       } catch (err) {
         console.error(err);
-        ctx.fillStyle = '#fee';
-        ctx.fillRect(0,0,canvas.width,canvas.height);
-        ctx.fillStyle = '#900';
-        ctx.font = '20px sans-serif';
-        ctx.fillText('Failed to load JOURNAL.jrn', 10, 30);
+        alert('Failed to load JOURNAL.jrn:\n' + err);
       }
     }
     load();
 
-    // pan
-    let dragging = false, lastX=0, lastY=0;
+    // convert screen → world (CSS px)
+    function screenToWorld(sx, sy) {
+      const cx = (sx - window.innerWidth / 2) / cam.scale - cam.x;
+      const cy = (sy - window.innerHeight / 2) / cam.scale - cam.y;
+      return { x: cx, y: cy };
+    }
+
+    // pan handlers
     canvas.addEventListener('mousedown', e => {
-      dragging = true;
-      lastX = e.clientX; lastY = e.clientY;
+      isPanning = true;
+      lastX = e.clientX;
+      lastY = e.clientY;
     });
-    window.addEventListener('mouseup', () => dragging = false);
+    window.addEventListener('mouseup', () => {
+      isPanning = false;
+    });
     canvas.addEventListener('mousemove', e => {
-      if (!dragging) return;
-      const dx = (e.clientX - lastX)/cam.scale;
-      const dy = (e.clientY - lastY)/cam.scale;
-      cam.x += dx; cam.y += dy;
-      lastX = e.clientX; lastY = e.clientY;
+      if (!isPanning) return;
+      const dx = e.clientX - lastX;
+      const dy = e.clientY - lastY;
+      lastX = e.clientX;
+      lastY = e.clientY;
+      cam.x += dx / cam.scale;
+      cam.y += dy / cam.scale;
       draw();
     });
 
-    // zoom
+    // zoom toward cursor
     canvas.addEventListener('wheel', e => {
       e.preventDefault();
-      const rect = canvas.getBoundingClientRect();
-      // mouse in world coords
-      const mx = (e.clientX - rect.left)/cam.scale - cam.x;
-      const my = (e.clientY - rect.top )/cam.scale - cam.y;
+      const before = screenToWorld(e.clientX, e.clientY);
       const factor = Math.exp(-e.deltaY * 0.001);
       cam.scale *= factor;
-      // keep point under cursor fixed
-      cam.x = (e.clientX - rect.left)/cam.scale - mx;
-      cam.y = (e.clientY - rect.top )/cam.scale - my;
+      const after = screenToWorld(e.clientX, e.clientY);
+      cam.x += after.x - before.x;
+      cam.y += after.y - before.y;
       draw();
     }, { passive: false });
 
+    // main draw
     function draw() {
       if (!data) return;
-      // clear
-      ctx.fillStyle = data.background || '#fff';
-      ctx.fillRect(0,0,canvas.width,canvas.height);
 
-      // set up camera
       ctx.save();
-      // center to canvas middle
-      ctx.translate(canvas.width/(2*dpr), canvas.height/(2*dpr));
+      ctx.scale(dpr, dpr);
+
+      // clear & background
+      ctx.fillStyle = data.background || '#fff';
+      ctx.fillRect(0, 0, window.innerWidth, window.innerHeight);
+
+      // apply camera (CSS px coords)
+      ctx.translate(window.innerWidth / 2, window.innerHeight / 2);
       ctx.scale(cam.scale, cam.scale);
       ctx.translate(cam.x, cam.y);
 
-      // render items in order
+      // draw items
       for (const itm of data.items) {
         if (itm.type === 'image') {
-          const key = itm.b64;
-          let img = imgCache[key];
+          let img = imgCache[itm.b64];
           if (!img) {
             img = new Image();
-            img.src = 'data:image/png;base64,' + key;
-            img.onload = draw;  // redraw once loaded
-            imgCache[key] = img;
+            img.src = 'data:image/png;base64,' + itm.b64;
+            img.onload = draw;
+            imgCache[itm.b64] = img;
           }
           if (img.complete) {
             const s = itm.scale || 1;
-            ctx.drawImage(img, itm.x, itm.y, img.width * s, img.height * s);
+            ctx.drawImage(img,
+              itm.x, itm.y,
+              img.width * s, img.height * s
+            );
           }
-        }
-        else if (itm.type === 'text') {
+        } else if (itm.type === 'text') {
           ctx.fillStyle = '#000';
           ctx.font = '16px Courier New';
-          // y+16 so text baseline matches your original
           ctx.fillText(itm.text, itm.x, itm.y + 16);
         }
       }
