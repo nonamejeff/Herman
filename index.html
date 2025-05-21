@@ -4,17 +4,13 @@
   <meta charset="UTF-8">
   <title>Journal Viewer</title>
   <style>
-    body { margin: 0; overflow: hidden; background: #f0f0f0; }
-    canvas { display: block; }
+    body { margin:0; overflow:hidden; background:#f0f0f0 }
+    canvas { display:block }
     #status {
-      position: fixed;
-      top: 8px;
-      left: 8px;
-      padding: 4px 8px;
-      background: rgba(255,255,255,0.9);
-      font: 14px sans-serif;
-      border: 1px solid #ccc;
-      z-index: 1000;
+      position: fixed; top:8px; left:8px;
+      padding:4px 8px; background:rgba(255,255,255,0.9);
+      border:1px solid #ccc; font:14px sans-serif;
+      z-index:1000;
     }
   </style>
 </head>
@@ -22,20 +18,19 @@
   <div id="status">Loading…</div>
   <canvas id="cv"></canvas>
   <script>
-    const status = document.getElementById('status');
     const canvas = document.getElementById('cv');
     const ctx    = canvas.getContext('2d');
+    const status = document.getElementById('status');
     const dpr    = window.devicePixelRatio || 1;
 
-    // camera for pan & zoom
-    const cam = { x: 0, y: 0, scale: 1 };
-    let isPanning = false, lastX = 0, lastY = 0;
+    // pan & zoom state
+    const cam = { x:0, y:0, scale:1 };
+    let isPanning=false, lastX=0, lastY=0;
 
-    let data, sceneW = 10000, sceneH = 10000;
+    let data, sceneW=10000, sceneH=10000;
     const imgCache = {};
 
-    // resize canvas for CSS size × DPR
-    function resize() {
+    function resize(){
       canvas.width  = window.innerWidth  * dpr;
       canvas.height = window.innerHeight * dpr;
       canvas.style.width  = window.innerWidth  + 'px';
@@ -44,115 +39,99 @@
     }
     window.addEventListener('resize', resize);
 
-    // load JSON + preload images
-    async function loadJournal() {
+    async function loadJournal(){
       try {
         const resp = await fetch('JOURNAL.jrn');
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        if(!resp.ok) throw new Error(resp.status);
         data = await resp.json();
         sceneW = data.width  || sceneW;
         sceneH = data.height || sceneH;
-
-        // preload all images
-        const imgs = data.items.filter(i => i.type === 'image');
-        let loaded = 0;
-        if (imgs.length === 0) {
-          status.textContent = 'No images to load';
-        } else {
-          imgs.forEach(itm => {
-            const img = new Image();
-            img.src = 'data:image/png;base64,' + itm.b64;
-            img.onload = () => {
-              imgCache[itm.b64] = img;
-              loaded++;
-              status.textContent = `Loaded ${loaded}/${imgs.length} images`;
-              if (loaded === imgs.length) {
-                status.textContent = `All ${loaded} images loaded`;
-                resize();
-              }
-            };
-          });
-        }
-
-        // center-ish: start with no zoom/pan
-        cam.x = 0;
-        cam.y = 0;
-        cam.scale = 1;
-
-        status.textContent = imgs.length
-          ? `Loading 0/${imgs.length} images`
-          : `Ready (no images)`;
-
+        status.textContent = 'Preloading images…';
+        // preload images
+        const imgs = data.items.filter(i=>i.type==='image');
+        await Promise.all(imgs.map(itm => new Promise(res=>{
+          const img = new Image();
+          img.src = 'data:image/png;base64,' + itm.b64;
+          img.onload = ()=>{
+            imgCache[itm.b64] = img;
+            res();
+          };
+        })));
+        status.textContent = 'All images loaded';
+        cam.x = 0; cam.y = 0; cam.scale = 1;
         resize();
-      } catch (err) {
+      } catch(err){
         console.error(err);
-        status.textContent = `Error: ${err.message}`;
+        status.textContent = 'Error loading: '+err;
       }
     }
     loadJournal();
 
     // pan handlers
-    canvas.addEventListener('mousedown', e => {
-      isPanning = true;
-      lastX = e.clientX;
-      lastY = e.clientY;
+    canvas.addEventListener('mousedown',e=>{
+      isPanning = true; lastX=e.clientX; lastY=e.clientY;
     });
-    window.addEventListener('mouseup', () => (isPanning = false));
-    canvas.addEventListener('mousemove', e => {
-      if (!isPanning) return;
+    window.addEventListener('mouseup',()=>isPanning=false);
+    canvas.addEventListener('mousemove',e=>{
+      if(!isPanning) return;
       const dx = e.clientX - lastX, dy = e.clientY - lastY;
       lastX = e.clientX; lastY = e.clientY;
-      // CSS-px → world units:
-      cam.x += dx / (dpr * cam.scale);
-      cam.y += dy / (dpr * cam.scale);
+      // dx,dy in CSS px; world‐units = dx/(cam.scale)
+      cam.x += dx / cam.scale;
+      cam.y += dy / cam.scale;
       draw();
     });
 
     // zoom toward cursor
-    canvas.addEventListener('wheel', e => {
+    canvas.addEventListener('wheel', e=>{
       e.preventDefault();
-      const sx = e.clientX, sy = e.clientY;
-      // map screen→world
+      const sx=e.clientX, sy=e.clientY;
+      // world under cursor before zoom
       const wx0 = (sx / cam.scale / dpr) - cam.x;
       const wy0 = (sy / cam.scale / dpr) - cam.y;
-      const factor = Math.exp(-e.deltaY * 0.001);
-      cam.scale *= factor;
-      // adjust pan so point stays under cursor
+      const f = Math.exp(-e.deltaY * 0.001);
+      cam.scale *= f;
+      // adjust pan so that world point stays under cursor
       cam.x = (sx / cam.scale / dpr) - wx0;
       cam.y = (sy / cam.scale / dpr) - wy0;
       draw();
-    }, { passive: false });
+    }, { passive:false });
 
-    // main draw
-    function draw() {
-      if (!data) return;
+    function draw(){
+      if(!data) return;
 
-      // reset to device pixels
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      // 1) reset transform & clear entire device‐pixel canvas
+      ctx.setTransform(1,0,0,1,0,0);
+      ctx.clearRect(0,0,canvas.width,canvas.height);
 
-      // draw background in CSS px
-      ctx.scale(dpr, dpr);
-      ctx.fillStyle = data.background || '#fff';
-      ctx.fillRect(0, 0, window.innerWidth, window.innerHeight);
+      // 2) draw background in device pixels
+      ctx.setTransform(dpr,0,0,dpr,0,0);
+      ctx.fillStyle = data.background||'#fff';
+      ctx.fillRect(0,0,window.innerWidth,window.innerHeight);
 
-      // apply world transform
+      // 3) apply single composite transform: [dpr*scale, ... , pan*dpr*scale]
       const m = dpr * cam.scale;
-      ctx.setTransform(m, 0, 0, m, cam.x * m, cam.y * m);
+      ctx.setTransform(
+        m, 0,
+        0, m,
+        cam.x * m,
+        cam.y * m
+      );
 
-      // draw items at their original coordinates
-      for (const itm of data.items) {
-        if (itm.type === 'image') {
+      // 4) render every item exactly at its world x,y
+      for(const itm of data.items){
+        if(itm.type === 'image'){
           const img = imgCache[itm.b64];
-          if (img) {
-            const s = itm.scale || 1;
+          if(img){
+            const s = itm.scale||1;
             ctx.drawImage(img,
               itm.x, itm.y,
-              img.width * s, img.height * s
+              img.width * s,
+              img.height * s
             );
           }
         }
-        else if (itm.type === 'text') {
+        else if(itm.type === 'text'){
           ctx.fillStyle = '#000';
           ctx.font = '16px Courier New';
           ctx.fillText(itm.text, itm.x, itm.y + 16);
