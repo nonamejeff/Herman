@@ -5,27 +5,33 @@
   <title>Journal Viewer</title>
   <style>
     html, body {
-      margin: 0;
-      padding: 0;
-      height: 100%;
+      margin: 0; padding: 0;
+      width: 100%; height: 100%;
       overflow: hidden;
-      background: #888;
+      background: #111;
     }
+    /* scrolling container fills viewport */
     #container {
-      width: 100%;
-      height: 100%;
+      width: 100%; height: 100%;
       overflow: auto;
       cursor: grab;
+      background: #222;
     }
     #container:active {
       cursor: grabbing;
     }
-    #container img {
+    /* image rendered at natural size, centered in container */
+    #journal {
       display: block;
-      transform-origin: top left;
-      /* disable the browser’s default image drag behavior */
-      user-drag: none; user-select: none;
-      -webkit-user-drag: none; -webkit-user-select: none;
+      margin: auto;
+      /* turn off any automatic scaling */
+      max-width: none;
+      max-height: none;
+      /* allow native drag */
+      user-drag: auto;
+      user-select: auto;
+      -webkit-user-drag: auto;
+      -webkit-user-select: auto;
     }
   </style>
 </head>
@@ -33,53 +39,5 @@
   <div id="container">
     <img id="journal" src="journal.png" alt="Journal">
   </div>
-
-  <script>
-    (function() {
-      const container = document.getElementById('container');
-      const img       = document.getElementById('journal');
-      let scale = 1;
-
-      // Zoom on wheel
-      container.addEventListener('wheel', e => {
-        e.preventDefault();
-        // increase/decrease scale
-        const delta = e.deltaY < 0 ? 1.1 : 0.9;
-        scale = Math.min(Math.max(scale * delta, 0.1), 10);
-        img.style.transform = `scale(${scale})`;
-      });
-
-      // Optional: click & drag to pan
-      let isDown = false;
-      let startX, startY, scrollLeft, scrollTop;
-
-      container.addEventListener('mousedown', e => {
-        isDown = true;
-        container.classList.add('active');
-        startX = e.pageX - container.offsetLeft;
-        startY = e.pageY - container.offsetTop;
-        scrollLeft  = container.scrollLeft;
-        scrollTop   = container.scrollTop;
-      });
-      container.addEventListener('mouseup', () => {
-        isDown = false;
-        container.classList.remove('active');
-      });
-      container.addEventListener('mouseleave', () => {
-        isDown = false;
-        container.classList.remove('active');
-      });
-      container.addEventListener('mousemove', e => {
-        if (!isDown) return;
-        e.preventDefault();
-        const x = e.pageX - container.offsetLeft;
-        const y = e.pageY - container.offsetTop;
-        const walkX = (x - startX) * (1 / scale) * -1;
-        const walkY = (y - startY) * (1 / scale) * -1;
-        container.scrollLeft = scrollLeft + walkX;
-        container.scrollTop  = scrollTop  + walkY;
-      });
-    })();
-  </script>
 </body>
 </html>
