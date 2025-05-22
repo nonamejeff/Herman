@@ -4,141 +4,64 @@
   <meta charset="UTF-8">
   <title>Journal Viewer</title>
   <style>
-    body { margin:0; overflow:hidden; background:#f0f0f0 }
-    canvas { display:block }
-    #status {
-      position:fixed; top:8px; left:8px;
-      padding:4px 8px; background:rgba(255,255,255,0.9);
-      border:1px solid #ccc; font:14px sans-serif;
-      z-index:1000;
+    body {
+      margin: 0;
+      padding: 0;
+      background: #f0f0f0;
+      overflow: auto;
+    }
+    #viewer {
+      position: relative;
+      width: 10000px;
+      height: 10000px;
+      background: #fff;
+    }
+    .text-item {
+      position: absolute;
+      font: 16px "Courier New", monospace;
+      white-space: pre;    /* preserve your manual line-breaks exactly */
+      color: #000;
+    }
+    .image-item {
+      position: absolute;
+      transform-origin: top left;
+      user-select: none;
+      pointer-events: none;
     }
   </style>
 </head>
 <body>
-  <div id="status">Loading…</div>
-  <canvas id="cv"></canvas>
+  <div id="viewer"></div>
   <script>
-    const canvas = document.getElementById('cv');
-    const ctx    = canvas.getContext('2d');
-    const status = document.getElementById('status');
-    const dpr    = window.devicePixelRatio || 1;
-
-    let data, imgCache = {}, cam = { x:0,y:0,scale:1 };
-    let isPanning=false, lastX, lastY;
-
-    function resize() {
-      canvas.width  = innerWidth  * dpr;
-      canvas.height = innerHeight * dpr;
-      canvas.style.width  = innerWidth  + 'px';
-      canvas.style.height = innerHeight + 'px';
-      draw();
-    }
-    window.addEventListener('resize', resize);
-
-    // load journal + preload images
     (async function(){
-      try {
-        const r = await fetch('JOURNAL.jrn');
-        if (!r.ok) throw new Error(r.status);
-        data = await r.json();
-
-        const images = data.items.filter(i=>i.type==='image');
-        status.textContent = `Loading ${images.length} images…`;
-        let cnt = 0;
-        await Promise.all(images.map(itm => new Promise(res=>{
-          const img = new Image();
-          img.src = 'data:image/png;base64,' + itm.b64;
-          img.onload = () => {
-            imgCache[itm.b64] = img;
-            cnt++;
-            status.textContent = `Loaded ${cnt}/${images.length}`;
-            res();
-          };
-        })));
-
-        status.textContent = 'All images loaded';
-        cam = { x:0, y:0, scale:1 };
-        resize();
-      } catch(err) {
-        console.error(err);
-        status.textContent = `Error: ${err.message}`;
+      const resp = await fetch('JOURNAL.jrn');
+      if (!resp.ok) {
+        document.body.textContent = 'Failed to load JOURNAL.jrn';
+        return;
       }
-    })();
-
-    // pan handlers
-    canvas.addEventListener('mousedown', e=>{
-      isPanning = true;
-      lastX = e.clientX; lastY = e.clientY;
-    });
-    window.addEventListener('mouseup', ()=> isPanning=false);
-    canvas.addEventListener('mousemove', e=>{
-      if (!isPanning) return;
-      const dx = e.clientX - lastX, dy = e.clientY - lastY;
-      lastX = e.clientX; lastY = e.clientY;
-      cam.x += dx / (dpr * cam.scale);
-      cam.y += dy / (dpr * cam.scale);
-      draw();
-    });
-
-    // zoom toward cursor
-    canvas.addEventListener('wheel', e=>{
-      e.preventDefault();
-      const sx = e.clientX, sy = e.clientY;
-      const wx0 = (sx / (cam.scale * dpr)) - cam.x;
-      const wy0 = (sy / (cam.scale * dpr)) - cam.y;
-      const f = Math.exp(-e.deltaY * 0.001);
-      cam.scale *= f;
-      cam.x = (sx / (cam.scale * dpr)) - wx0;
-      cam.y = (sy / (cam.scale * dpr)) - wy0;
-      draw();
-    }, { passive:false });
-
-    function draw(){
-      if (!data) return;
-
-      // reset & clear
-      ctx.setTransform(1,0,0,1,0,0);
-      ctx.clearRect(0,0,canvas.width,canvas.height);
-
-      // draw background in device pixels
-      ctx.setTransform(dpr,0,0,dpr,0,0);
-      ctx.fillStyle = data.background || '#fff';
-      ctx.fillRect(0,0,innerWidth,innerHeight);
-
-      // apply pan+zoom
-      const m = dpr * cam.scale;
-      ctx.setTransform(m,0,0,m, cam.x*m, cam.y*m);
-
-      // --- FILL CODE ---
-      // match Qt's lineSpacing (16px font + ~2px leading = 18px)
-      ctx.fillStyle    = '#000';
-      ctx.font         = '16px "Courier New"';
-      ctx.textBaseline = 'top';
-      const lineHeight = 18;
+      const data = await resp.json();
+      const viewer = document.getElementById('viewer');
 
       for (const itm of data.items) {
         if (itm.type === 'image') {
-          const img = imgCache[itm.b64];
-          if (!img) continue;
-          const s = itm.scale || 1;
-          ctx.drawImage(
-            img,
-            itm.x, itm.y,
-            img.width  * s,
-            img.height * s
-          );
-        }
-        else if (itm.type === 'text') {
-          const lines = itm.text.split(/\r?\n/);
-          let y = itm.y;
-          for (let line of lines) {
-            ctx.fillText(line, itm.x, y);
-            y += lineHeight;
-          }
+          const img = document.createElement('img');
+          img.src = 'data:image/png;base64,' + itm.b64;
+          img.className = 'image-item';
+          img.style.left  = itm.x + 'px';
+          img.style.top   = itm.y + 'px';
+          img.style.transform = `scale(${itm.scale || 1})`;
+          viewer.appendChild(img);
+
+        } else if (itm.type === 'text') {
+          const div = document.createElement('div');
+          div.className = 'text-item';
+          div.style.left = itm.x + 'px';
+          div.style.top  = itm.y + 'px';
+          div.textContent = itm.text;  // preserves your \n exactly
+          viewer.appendChild(div);
         }
       }
-      // --- END FILL CODE ---
-    }
+    })();
   </script>
 </body>
 </html>
