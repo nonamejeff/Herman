@@ -1,72 +1,30 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
+  <meta charset="UTF-8"/>
   <title>Journal Viewer</title>
   <style>
     html, body {
-      margin:0; padding:0;
-      width:100%; height:100%;
-      overflow:hidden;
-      background:#333;
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: auto;       /* native scrollbars */
+      background: #333;
     }
-    #controls {
-      position:fixed;
-      top:10px; left:50%; transform:translateX(-50%);
-      background:rgba(0,0,0,0.5);
-      padding:8px 12px;
-      border-radius:4px;
-      color:#fff;
-      font-family:sans-serif;
-      z-index:1000;
-    }
-    #container {
-      position:absolute;
-      top:0; left:0; right:0; bottom:0;
-      overflow:auto;
-      background:#444;
-    }
-    #journal {
-      display:block;
-      margin:auto;
-      /* no max-width/height; we'll drive width via slider */
-      user-drag: none;
+    img#journal {
+      display: block;
+      width: 100vw;          /* fill viewport width on load */
+      height: auto;
+      user-drag: none;       /* disable image dragging artifacts */
       user-select: none;
       -webkit-user-drag: none;
       -webkit-user-select: none;
     }
-    label { cursor: pointer; }
   </style>
 </head>
 <body>
-  <div id="controls">
-    <label>
-      Zoom: 
-      <input id="zoom" type="range" min="10" max="300" value="100">
-      <span id="zoomVal">100%</span>
-    </label>
-  </div>
-  <div id="container">
-    <img id="journal" src="journal.png" alt="Journal">
-  </div>
-
-  <script>
-    const zoom   = document.getElementById('zoom');
-    const zoomVal= document.getElementById('zoomVal');
-    const img    = document.getElementById('journal');
-
-    // on slider change, set image width (% of its natural width)
-    zoom.addEventListener('input', ()=>{
-      img.style.width = zoom.value + '%';
-      zoomVal.textContent = zoom.value + '%';
-    });
-
-    // on load, fit full frame (100%)
-    window.addEventListener('load', ()=>{
-      img.style.width = '100%';
-      zoom.value = 100;
-      zoomVal.textContent = '100%';
-    });
-  </script>
+  <!-- Just drop your journal.png next to this file -->
+  <img id="journal" src="journal.png" alt="Journal">
 </body>
 </html>
