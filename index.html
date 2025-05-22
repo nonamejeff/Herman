@@ -5,9 +5,9 @@
   <title>Journal Viewer</title>
   <style>
     body {
-      margin: 0;
-      padding: 0;
-      background: #f0f0f0;
+      margin:0;
+      padding:0;
+      background:#f0f0f0;
       overflow: auto;
     }
     #viewer {
@@ -16,16 +16,18 @@
       height: 10000px;
       background: #fff;
     }
-    .text-item {
-      position: absolute;
-      font: 16px "Courier New", monospace;
-      white-space: pre;    /* preserve your manual line-breaks exactly */
-      color: #000;
-    }
     .image-item {
       position: absolute;
       transform-origin: top left;
       user-select: none;
+      pointer-events: none;
+    }
+    .text-item {
+      position: absolute;
+      font:16px "Courier New", monospace;
+      line-height:18px;        /* match 16px font + 2px leading */
+      white-space: pre-wrap;   /* preserve your \n and wrap long lines */
+      word-break: break-word;   /* break really long words if needed */
       pointer-events: none;
     }
   </style>
@@ -33,35 +35,43 @@
 <body>
   <div id="viewer"></div>
   <script>
-    (async function(){
-      const resp = await fetch('JOURNAL.jrn');
-      if (!resp.ok) {
-        document.body.textContent = 'Failed to load JOURNAL.jrn';
-        return;
+  (async function(){
+    const resp = await fetch('JOURNAL.jrn');
+    if(!resp.ok) {
+      document.body.textContent = 'Failed to load JOURNAL.jrn';
+      return;
+    }
+    const data = await resp.json();
+    const viewer = document.getElementById('viewer');
+    // set background if you like:
+    viewer.style.background = data.background || '#fff';
+
+    for(const itm of data.items){
+      if(itm.type === 'image'){
+        const img = document.createElement('img');
+        img.className = 'image-item';
+        img.src       = 'data:image/png;base64,' + itm.b64;
+        img.style.left      = itm.x + 'px';
+        img.style.top       = itm.y + 'px';
+        img.style.transform = `scale(${itm.scale||1})`;
+        viewer.appendChild(img);
       }
-      const data = await resp.json();
-      const viewer = document.getElementById('viewer');
-
-      for (const itm of data.items) {
-        if (itm.type === 'image') {
-          const img = document.createElement('img');
-          img.src = 'data:image/png;base64,' + itm.b64;
-          img.className = 'image-item';
-          img.style.left  = itm.x + 'px';
-          img.style.top   = itm.y + 'px';
-          img.style.transform = `scale(${itm.scale || 1})`;
-          viewer.appendChild(img);
-
-        } else if (itm.type === 'text') {
-          const div = document.createElement('div');
-          div.className = 'text-item';
-          div.style.left = itm.x + 'px';
-          div.style.top  = itm.y + 'px';
-          div.textContent = itm.text;  // preserves your \n exactly
-          viewer.appendChild(div);
+      else if(itm.type === 'text'){
+        const div = document.createElement('div');
+        div.className = 'text-item';
+        div.style.left = itm.x + 'px';
+        div.style.top  = itm.y + 'px';
+        // if your JSON has a width, use it; otherwise you can set a default:
+        if(itm.width){
+          div.style.width = itm.width + 'px';
+        } else {
+          div.style.maxWidth = '400px'; // or whatever default max
         }
+        div.textContent = itm.text;   // preserves \n
+        viewer.appendChild(div);
       }
-    })();
+    }
+  })();
   </script>
 </body>
 </html>
